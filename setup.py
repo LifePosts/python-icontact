@@ -5,6 +5,7 @@ import os
 from distutils.command.install import INSTALL_SCHEMES
 from distutils.core import setup
 
+
 def fullsplit(path, result=None):
     """
     Split a pathname into components (the opposite of os.path.join) in a
@@ -53,18 +54,21 @@ else:
     version = "%d.%d" % version_tuple[:2]
 
 setup(
-    name = 'python-icontact',
-    version = version,
-    description = 'iContact API client library',
-    author = 'James Murty',
-    author_email = 'jmurty@gmail.com',
-    url = 'http://code.google.com/p/python-icontact/',
-    packages = packages,
-    data_files = data_files,
-    classifiers = ['Development Status :: 4 - Beta',
-                   'Intended Audience :: Developers',
-                   'License :: OSI Approved :: Apache License',
-                   'Operating System :: OS Independent',
-                   'Programming Language :: Python',
-                   'Topic :: Software Development :: Libraries :: Python Modules'],
+    name='python-icontact',
+    version=version,
+    description='iContact API client library',
+    author='James Murty',
+    author_email='jmurty@gmail.com',
+    url='http://code.google.com/p/python-icontact/',
+    packages=packages,
+    install_requires=[
+        'python-dateutil',
+    ],
+    data_files=data_files,
+    classifiers=['Development Status :: 4 - Beta',
+                 'Intended Audience :: Developers',
+                 'License :: OSI Approved :: Apache License',
+                 'Operating System :: OS Independent',
+                 'Programming Language :: Python',
+                 'Topic :: Software Development :: Libraries :: Python Modules'],
 )
