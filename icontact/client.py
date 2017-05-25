@@ -290,15 +290,10 @@ class IContactClient(object):
         if params is None:
             params = {}
         params.update(kwarg_params)
+        querystring = urllib.urlencode(params)
 
-        p = ""
-        for k in params:
-            if len(p) > 0:
-                p += "&"
-            p += "%s=%s" % (k, urllib.quote(params[k]))
-
-        result = self._do_request('a/%s/c/%s/contacts/?%s' % (account_id, client_folder_id, p), type='json')
-        self.log.debug("search_contacts(%s)=%s" % (p, result))
+        result = self._do_request('a/%s/c/%s/contacts/?%s' % (account_id, client_folder_id, querystring), type='json')
+        self.log.debug("search_contacts(%s)=%s" % (querystring, result))
         return result
 
     def lists(self, params=None, account_id=None, client_folder_id=None, filters=None):
@@ -409,6 +404,23 @@ class IContactClient(object):
 
         return result
 
+    def create_or_update_contact(self, account_id=None, client_folder_id=None, data=None):
+        """
+        Create or Update the contact
+        :param data: List of dicts holding multiple contacts data
+        """
+        account_id, client_folder_id = self._required_values(account_id,
+                                                             client_folder_id)
+        if data and type(data) != list:
+            data = [data]
+
+        result = self._do_request('a/%s/c/%s/contacts/' %
+                                  (account_id, client_folder_id),
+                                  parameters=data,
+                                  method='post',
+                                  force_dict_params=False)
+        return result
+
     def create_contact(self, email, account_id=None, client_folder_id=None, **kwargs):
         """
         Creates the contact and returns the contact object.
@@ -481,6 +493,22 @@ class IContactClient(object):
         result = self._do_request('a/%s/c/%s/subscriptions/%s' % (account_id, client_folder_id,
                                   self._get_query_string(filters)))
 
+        return result
+
+    def create_or_update_subscription(self, account_id=None, client_folder_id=None, data=None):
+        """
+        Create or Update the subscription for the contact.
+        """
+        account_id, client_folder_id = self._required_values(account_id, client_folder_id)
+
+        if data and type(data) != list:
+            data = [data]
+
+        result = self._do_request('a/%s/c/%s/subscriptions/' %
+                                  (account_id, client_folder_id),
+                                  parameters=data,
+                                  method='post',
+                                  force_dict_params=False)
         return result
 
     def create_message(self, subject, message_type, account_id=None, client_folder_id=None, **kwargs):
@@ -556,7 +584,7 @@ class IContactClient(object):
 
     def create_or_update_custom_object(self, custom_object_id, account_id=None, client_folder_id=None, data=None):
         """
-        Update the custom object data
+        Create or Update the custom object data
         :param data: List of dicts holding multiple custom objects data
         """
         account_id, client_folder_id = self._required_values(account_id,
