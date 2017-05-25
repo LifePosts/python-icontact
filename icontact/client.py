@@ -599,6 +599,27 @@ class IContactClient(object):
                                   force_dict_params=False)
         return result
 
+    def delete_custom_object_data(self, custom_object_id, custom_object_field_definition_id,
+                                  account_id=None, client_folder_id=None):
+        """
+        Deletes the custom object data record for custom object specified via `custom_object_id`
+        """
+        account_id, client_folder_id = self._required_values(account_id, client_folder_id)
+        result = self._do_request('a/%s/c/%s/customobjects/%s/data/%s/' % (
+            account_id, client_folder_id, custom_object_id, custom_object_field_definition_id), method='delete')
+
+        return result
+
+    def get_custom_object_data(self, custom_object_id, account_id=None, client_folder_id=None, **kwargs):
+        """
+        Get all records of a custom object defined by `custom_object_id`
+        """
+        account_id, client_folder_id = self._required_values(account_id, client_folder_id)
+        result = self._do_request('a/%s/c/%s/customobjects/%s/data/?%s' % (
+            account_id, client_folder_id, custom_object_id, urllib.urlencode(kwargs)))
+
+        return result
+
 
 class FixedOffset(tzinfo):
     """
