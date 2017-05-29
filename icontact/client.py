@@ -74,7 +74,7 @@ class IContactClient(object):
 
     def __init__(self, api_key, username, password, auth_handler=None,
                  max_retry_count=5, account_id=None, client_folder_id=None,
-                 url=ICONTACT_API_URL, api_version='2.2'):
+                 url=ICONTACT_API_URL, api_version='2.2', log_enabled=False):
         """
         - api_key: the API Key assigned for the OA iContact client
         - username: the iContact web site login username
@@ -100,7 +100,6 @@ class IContactClient(object):
         self.username = username
         self.password = password
         self.auth_handler = auth_handler
-        self.log = logging.getLogger('icontact')
         self.max_retry_count = max_retry_count
 
         self.account_id = account_id
@@ -109,6 +108,9 @@ class IContactClient(object):
         # Track number of retries we have performed
         self.retry_count = 0
         self.url = url
+
+        self.log = logging.getLogger('icontact')
+        self.log_enabled = log_enabled
 
     def _get_account_id(self):
         self.account_id = self.account().accountId
@@ -147,7 +149,7 @@ class IContactClient(object):
             url = "%s%s" % (self.url, call_path)
             data = json.dumps(params)
 
-        self.log.debug(u"Invoking API method %s with URL: %s" % (method, url))
+        self.log_me(u"Invoking API method %s with URL: %s" % (method, url))
 
         if type == 'xml':
             type_header = 'text/xml'
@@ -164,28 +166,28 @@ class IContactClient(object):
 
         if method.lower() != 'get':
             # Perform a PUT request
-            self.log.debug(u'%s Request %s body: %s' % (method, url, data))
+            self.log_me(u'%s Request %s body: %s' % (method, url, data))
             scheme, host, path, params, query, fragment = urlparse.urlparse(url)
             conn = httplib.HTTPSConnection(host, 443)
             conn.request(method.upper(), path, data, headers)
             response = conn.getresponse()
-            self.log.debug("response.status=%s msg=%s headers=%s" %
+            self.log_me("response.status=%s msg=%s headers=%s" %
                            (response.status, response.msg, response.getheaders(),))
             response_status = response.status
         else:
             # Perform a GET request
             req = urllib2.Request(url, None, headers)
-            self.log.debug("GET headers=%s url=%s" % (req.headers, url))
+            self.log_me("GET headers=%s url=%s" % (req.headers, url))
             response = urllib2.urlopen(req)
             response_status = response.code
 
         if type == 'xml':
             result = ElementTree.fromstring(response.read())
-            self.log.debug(u'Response body:\n%s' % (ElementTree.tostring(result),))
+            self.log_me(u'Response body:\n%s' % (ElementTree.tostring(result),))
         else:
             # type is json
             jsondata = response.read()
-            self.log.debug(u"json response=\n%s" % (jsondata,))
+            self.log_me(u"json response=\n%s" % (jsondata,))
             result = json.loads(jsondata)
             result = json_to_obj(result)
 
@@ -262,7 +264,7 @@ class IContactClient(object):
         Url: /icp/a/{accountId}/c
         """
         result = self._do_request('a/%s/c%s' % (account_id, self._get_query_string(filters)), type='json')
-        self.log.debug("clientfolders: %s" % (result,))
+        self.log_me("clientfolders: %s" % (result,))
         return result
 
     def clientfolder(self, account_id, index=0):
@@ -293,7 +295,7 @@ class IContactClient(object):
         querystring = urllib.urlencode(params)
 
         result = self._do_request('a/%s/c/%s/contacts/?%s' % (account_id, client_folder_id, querystring), type='json')
-        self.log.debug("search_contacts(%s)=%s" % (querystring, result))
+        self.log_me("search_contacts(%s)=%s" % (querystring, result))
         return result
 
     def lists(self, params=None, account_id=None, client_folder_id=None, filters=None):
@@ -619,6 +621,10 @@ class IContactClient(object):
             account_id, client_folder_id, custom_object_id, urllib.urlencode(kwargs)))
 
         return result
+
+    def log_me(self, msg):
+        if self.log_enabled:
+            self.log.debug(msg)
 
 
 class FixedOffset(tzinfo):
