@@ -105,7 +105,7 @@ class IContactClient(object):
     def _perform_request(self, method, url, **kwargs):
         return requests.request(method.upper(), url, **kwargs)
 
-    def _do_request(self, call_path, parameters=None, method='get', type='json', params_as_json=False):
+    def _do_request(self, call_path, parameters=None, method='get', response_type='json', params_as_json=False):
         """
         Performs an API request and returns the resultant json object.
         If type='xml' is passed in, returns XML document as an
@@ -122,7 +122,7 @@ class IContactClient(object):
 
         url = '%s%s' % (self.url, call_path)
 
-        type_header = 'text/xml' if type == 'xml' else 'application/json'
+        type_header = 'text/xml' if response_type == 'xml' else 'application/json'
         headers = {
             'Accept': type_header,
             'Content-Type': type_header,
@@ -150,7 +150,7 @@ class IContactClient(object):
         self.log_me('response.status=%s headers=%s' % (req.status_code, req.headers,))
         response_status = req.status_code
 
-        if type == 'xml':
+        if response_type == 'xml':
             result = ElementTree.fromstring(req.content)
             self.log_me(u'Response body:\n%s' % (ElementTree.tostring(result),))
         else:
