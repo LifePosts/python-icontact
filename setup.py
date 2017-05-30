@@ -62,7 +62,7 @@ setup(
     url='http://code.google.com/p/python-icontact/',
     packages=packages,
     install_requires=[
-        'python-dateutil',
+        'python-dateutil', 'requests'
     ],
     data_files=data_files,
     classifiers=['Development Status :: 4 - Beta',

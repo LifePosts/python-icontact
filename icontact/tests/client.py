@@ -1,8 +1,7 @@
 import os
 import unittest
 
-from icontact.client import IContactClient
-from icontact.tests import settings
+from icontact.client import IContactClient, IContactServerError
 
 
 class ClientTestCase(unittest.TestCase):
@@ -48,7 +47,9 @@ class ClientTestCase(unittest.TestCase):
         email = 'name@example.com'
         contacts = self.client.search_contacts({'email': email})
         contact_id = contacts.contacts[0].contactId
-        result = self.client.create_subscription(contact_id, settings.ICONTACT_MAIN_LIST_ID)
+        result = self.client.subscriptions(filters={'contactId': contact_id})
+        if result.total == 0:
+            result = self.client.create_subscription(contact_id, self.ICONTACT_MAIN_LIST_ID)
         self.assertTrue(len(result.subscriptions) == 1)
 
     def test_unsubscribe(self):
@@ -56,9 +57,15 @@ class ClientTestCase(unittest.TestCase):
         email = 'name@example.com'
         contacts = self.client.search_contacts({'email': email})
         contact_id = contacts.contacts[0].contactId
-        result = self.client.move_subscriber(
-            self.ICONTACT_MAIN_LIST_ID, contact_id, self.ICONTACT_HOLDING_LIST_ID)
-        self.assertTrue(result.subscription.listId == str(self.ICONTACT_HOLDING_LIST_ID))
+        try:
+            result = self.client.move_subscriber(
+                self.ICONTACT_MAIN_LIST_ID, contact_id, self.ICONTACT_HOLDING_LIST_ID)
+            self.assertTrue(result.subscription.listId == str(self.ICONTACT_HOLDING_LIST_ID))
+        except IContactServerError, e:
+            if e.http_status == 400 and 'No Changes Made' in e.errors:
+                pass
+            else:
+                raise e
 
 
 if __name__ == '__main__':

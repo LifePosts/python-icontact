@@ -11,12 +11,8 @@
 #    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #    See the License for the specific language governing permissions and
 #    limitations under the License.
-import json
-import httplib
-import urllib
-import urllib2
-import urlparse
 import logging
+import requests
 
 from datetime import tzinfo, timedelta
 
@@ -47,15 +43,6 @@ def json_to_obj(json_data):
     return o
 
 
-class ExcessiveRetriesException(Exception):
-    """
-    A standard exception that represents a potentially transient fault
-    where an an iContact API client fails to perform an operation more
-    than `self.max_retry_count` times.
-    """
-    pass
-
-
 class IContactServerError(Exception):
     def __init__(self, http_status, errors):
         self.http_status = http_status
@@ -73,7 +60,7 @@ class IContactClient(object):
     NAMESPACE = 'http://www.w3.org/1999/xlink'
 
     def __init__(self, api_key, username, password, auth_handler=None,
-                 max_retry_count=5, account_id=None, client_folder_id=None,
+                 account_id=None, client_folder_id=None,
                  url=ICONTACT_API_URL, api_version='2.2', log_enabled=False):
         """
         - api_key: the API Key assigned for the OA iContact client
@@ -82,8 +69,6 @@ class IContactClient(object):
           This is the password registered for the API client, also known
           as the "API Application Password". It is *not* the standard
           web site login password.
-        - max_retry_count: (Optional) Retry limit for logins or
-          rate-limited operations.
         - auth_handler: (Optional) An object that implements two callback
           methods that this client will invoke when it generates, or
           requires, authentication credentials. The authentication handler
@@ -100,13 +85,10 @@ class IContactClient(object):
         self.username = username
         self.password = password
         self.auth_handler = auth_handler
-        self.max_retry_count = max_retry_count
 
         self.account_id = account_id
         self.client_folder_id = client_folder_id
 
-        # Track number of retries we have performed
-        self.retry_count = 0
         self.url = url
 
         self.log = logging.getLogger('icontact')
@@ -120,7 +102,10 @@ class IContactClient(object):
         self.client_folder_id = self.clientfolder(self.account_id).clientFolderId
         return self.client_folder_id
 
-    def _do_request(self, call_path, parameters=None, method='get', type='json', force_dict_params=True):
+    def _perform_request(self, method, url, **kwargs):
+        return requests.request(method.upper(), url, **kwargs)
+
+    def _do_request(self, call_path, parameters=None, method='get', type='json', params_as_json=False):
         """
         Performs an API request and returns the resultant json object.
         If type='xml' is passed in, returns XML document as an
@@ -132,80 +117,52 @@ class IContactClient(object):
         URL path; adding auth headers; sending the request to iContact;
         evaluating the response; and parsing the response to an XML node.
         """
-        # Check whether this method call was a retry that exceeds the retry limit
-        if self.retry_count > self.max_retry_count:
-            raise ExcessiveRetriesException("Exceeded maximum retry count (%d)" % self.max_retry_count)
         if parameters is None:
             parameters = {}
-        if force_dict_params:
-            params = dict(parameters)
-        else:
-            params = parameters
-        data = None
 
-        if method.lower() == 'get' and len(params) > 0:
-            url = "%s%s?%s" % (self.url, call_path, urllib.urlencode(params))
-        else:
-            url = "%s%s" % (self.url, call_path)
-            data = json.dumps(params)
+        url = '%s%s' % (self.url, call_path)
 
-        self.log_me(u"Invoking API method %s with URL: %s" % (method, url))
+        type_header = 'text/xml' if type == 'xml' else 'application/json'
+        headers = {
+            'Accept': type_header,
+            'Content-Type': type_header,
+            'Api-Version': self.api_version,
+            'Api-AppId': self.api_key,
+            'Api-Username': self.username,
+            'API-Password': self.password,
+        }
 
-        if type == 'xml':
-            type_header = 'text/xml'
-        else:
-            type_header = 'application/json'
-        headers = {'Accept': type_header,
-                   'Content-Type': type_header,
-                   'Api-Version': self.api_version,
-                   'Api-AppId': self.api_key,
-                   'Api-Username': self.username,
-                   'API-Password': self.password}
+        req_params = {
+            'headers': headers,
+        }
 
-        # TODO: try request for urllib2.HTTPError for 503 to do rate limit retry
+        if parameters:
+            if method.lower() == 'get':
+                req_params['params'] = parameters
+            else:
+                if params_as_json or method.lower() == 'put':
+                    req_params['json'] = parameters
+                else:
+                    req_params['data'] = parameters
 
-        if method.lower() != 'get':
-            # Perform a PUT request
-            self.log_me(u'%s Request %s body: %s' % (method, url, data))
-            scheme, host, path, params, query, fragment = urlparse.urlparse(url)
-            conn = httplib.HTTPSConnection(host, 443)
-            conn.request(method.upper(), path, data, headers)
-            response = conn.getresponse()
-            self.log_me("response.status=%s msg=%s headers=%s" %
-                           (response.status, response.msg, response.getheaders(),))
-            response_status = response.status
-        else:
-            # Perform a GET request
-            req = urllib2.Request(url, None, headers)
-            self.log_me("GET headers=%s url=%s" % (req.headers, url))
-            response = urllib2.urlopen(req)
-            response_status = response.code
+        self.log_me(u'Invoking API method %s with URL: %s' % (method, url))
+        req = self._perform_request(method, url, **req_params)
+        self.log_me('response.status=%s headers=%s' % (req.status_code, req.headers,))
+        response_status = req.status_code
 
         if type == 'xml':
-            result = ElementTree.fromstring(response.read())
+            result = ElementTree.fromstring(req.content)
             self.log_me(u'Response body:\n%s' % (ElementTree.tostring(result),))
         else:
             # type is json
-            jsondata = response.read()
-            self.log_me(u"json response=\n%s" % (jsondata,))
-            result = json.loads(jsondata)
+            result = req.json()
+            self.log_me(u'json response=\n%s' % (result,))
             result = json_to_obj(result)
 
         if response_status >= 400:
             raise IContactServerError(response_status, result.errors)
 
-        # Reset retry count to 0 since we have a successful response
-        self.retry_count = 0
         return result
-
-    def _get_query_string(self, params=None):
-        if params is None:
-            params = {}
-        if params:
-            query_string = '?' + '&'.join([k+'='+urllib.quote(str(v)) for (k, v) in params.items()])
-        else:
-            query_string = ''
-        return query_string
 
     def _parse_stats(self, node):
         """
@@ -254,7 +211,7 @@ class IContactClient(object):
         Returns the first account object in the accounts dictionary.
         Url: /icp/a/
         """
-        accountobj = self._do_request('a', type='json')
+        accountobj = self._do_request('a')
 
         return accountobj.accounts[index]
 
@@ -263,7 +220,7 @@ class IContactClient(object):
         Returns the clientfolders object.
         Url: /icp/a/{accountId}/c
         """
-        result = self._do_request('a/%s/c%s' % (account_id, self._get_query_string(filters)), type='json')
+        result = self._do_request('a/%s/c/' % account_id, parameters=filters)
         self.log_me("clientfolders: %s" % (result,))
         return result
 
@@ -292,13 +249,11 @@ class IContactClient(object):
         if params is None:
             params = {}
         params.update(kwarg_params)
-        querystring = urllib.urlencode(params)
 
-        result = self._do_request('a/%s/c/%s/contacts/?%s' % (account_id, client_folder_id, querystring), type='json')
-        self.log_me("search_contacts(%s)=%s" % (querystring, result))
+        result = self._do_request('a/%s/c/%s/contacts/' % (account_id, client_folder_id), parameters=params)
         return result
 
-    def lists(self, params=None, account_id=None, client_folder_id=None, filters=None):
+    def lists(self, account_id=None, client_folder_id=None, filters=None):
         """
         Returns iContact Lists
         params is a dictionary
@@ -308,8 +263,7 @@ class IContactClient(object):
         """
         account_id, client_folder_id = self._required_values(account_id, client_folder_id)
 
-        result = self._do_request('a/%s/c/%s/lists/%s' % (account_id, client_folder_id,
-                                  self._get_query_string(filters)))
+        result = self._do_request('a/%s/c/%s/lists/' % (account_id, client_folder_id), parameters=filters)
 
         return result
 
@@ -355,8 +309,7 @@ class IContactClient(object):
         """
         account_id, client_folder_id = self._required_values(account_id, client_folder_id)
 
-        result = self._do_request('a/%s/c/%s/segments/%s' % (account_id, client_folder_id,
-                                  self._get_query_string(filters)))
+        result = self._do_request('a/%s/c/%s/segments/' % (account_id, client_folder_id), parameters=filters)
 
         return result
 
@@ -420,7 +373,7 @@ class IContactClient(object):
                                   (account_id, client_folder_id),
                                   parameters=data,
                                   method='post',
-                                  force_dict_params=False)
+                                  params_as_json=True)
         return result
 
     def create_contact(self, email, account_id=None, client_folder_id=None, **kwargs):
@@ -471,8 +424,8 @@ class IContactClient(object):
         Returns action history for a contact
         """
         account_id, client_folder_id = self._required_values(account_id, client_folder_id)
-        result = self._do_request('a/%s/c/%s/contacts/%s/actions/%s' % (account_id, client_folder_id,
-                                  contact_id, self._get_query_string(filters)))
+        result = self._do_request('a/%s/c/%s/contacts/%s/actions/' % (account_id, client_folder_id,
+                                  contact_id), parameters=filters)
         return result
 
     def create_subscription(self, contact_id, list_id, status='normal', account_id=None, client_folder_id=None):
@@ -492,8 +445,7 @@ class IContactClient(object):
         """
         account_id, client_folder_id = self._required_values(account_id, client_folder_id)
 
-        result = self._do_request('a/%s/c/%s/subscriptions/%s' % (account_id, client_folder_id,
-                                  self._get_query_string(filters)))
+        result = self._do_request('a/%s/c/%s/subscriptions/' % (account_id, client_folder_id), parameters=filters)
 
         return result
 
@@ -510,7 +462,7 @@ class IContactClient(object):
                                   (account_id, client_folder_id),
                                   parameters=data,
                                   method='post',
-                                  force_dict_params=False)
+                                  params_as_json=True)
         return result
 
     def create_message(self, subject, message_type, account_id=None, client_folder_id=None, **kwargs):
@@ -529,8 +481,7 @@ class IContactClient(object):
 
     def messages(self, account_id=None, client_folder_id=None, filters=None):
         account_id, client_folder_id = self._required_values(account_id, client_folder_id)
-        result = self._do_request('a/%s/c/%s/messages/%s' % (account_id, client_folder_id,
-                                  self._get_query_string(filters)))
+        result = self._do_request('a/%s/c/%s/messages/' % (account_id, client_folder_id), parameters=filters)
         return result
 
     def get_message(self, message_id, account_id=None, client_folder_id=None):
@@ -598,7 +549,7 @@ class IContactClient(object):
                                   (account_id, client_folder_id, custom_object_id),
                                   parameters=data,
                                   method='post',
-                                  force_dict_params=False)
+                                  params_as_json=True)
         return result
 
     def delete_custom_object_data(self, custom_object_id, custom_object_field_definition_id,
@@ -617,8 +568,8 @@ class IContactClient(object):
         Get all records of a custom object defined by `custom_object_id`
         """
         account_id, client_folder_id = self._required_values(account_id, client_folder_id)
-        result = self._do_request('a/%s/c/%s/customobjects/%s/data/?%s' % (
-            account_id, client_folder_id, custom_object_id, urllib.urlencode(kwargs)))
+        result = self._do_request('a/%s/c/%s/customobjects/%s/data/' % (
+            account_id, client_folder_id, custom_object_id), parameters=kwargs)
 
         return result
 
